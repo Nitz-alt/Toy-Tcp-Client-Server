@@ -15,7 +15,7 @@
 
 
 void writeError(char *msg){
-    fprintf(stderr, msg);
+    fprintf(stderr, msg, NULL);
 }
 
 
@@ -28,16 +28,10 @@ int main(int argc, char *argv[])
     }
 
 
-    int totalsent = -1;
-    int nsent     = -1;
-    int len       = -1;
-    int n         =  0;
     int listenfd  = -1;
     int connfd    = -1;
 
     struct sockaddr_in serv_addr;
-    struct sockaddr_in my_addr;
-    struct sockaddr_in peer_addr;
     socklen_t addrsize = sizeof(struct sockaddr_in );
 
     char *data_buff;
@@ -47,7 +41,8 @@ int main(int argc, char *argv[])
     ssize_t bytesRead, totalBytesRead, bytesSent;
     char *buffer;
     char charater;
-    uint32_t total_printables, total_printables_toNetwork;
+    uint32_t total_printables;
+    int reuse;
 
 
     listenfd = socket( AF_INET, SOCK_STREAM, 0 );
@@ -59,7 +54,12 @@ int main(int argc, char *argv[])
     serv_addr.sin_port = htons(port);
 
     // Setting socket so port can be used again
-    setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, NULL, NULL);
+    if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (const void *) &reuse, sizeof(int)) < 0){
+        writeError("setsocketopt failed\n");
+    }
+    if (setsockopt(listenfd, SOL_SOCKET, 15, (const void *) &reuse, sizeof(int)) < 0){
+        writeError("setsocketopt failed\n");
+    }
 
     if( 0 != bind( listenfd,
                     (struct sockaddr*) &serv_addr,
@@ -81,11 +81,7 @@ int main(int argc, char *argv[])
     while( 1 )
     {
         // Accept a connection.
-        // Can use NULL in 2nd and 3rd arguments
-        // but we want to print the client socket details
-        connfd = accept( listenfd,
-                        (struct sockaddr*) &peer_addr,
-                        &addrsize);
+        connfd = accept( listenfd, NULL, NULL);
 
         if( connfd < 0 )
         {
@@ -102,11 +98,12 @@ int main(int argc, char *argv[])
                 break;
             }
         }
-
         file_size = ntohl(file_size);
+        
         bytesRead = 0;
         totalBytesRead = 0;
         buffer = data_buff;
+        total_printables = 0;
         while(1){
             bytesRead = read(connfd, buffer, file_size - totalBytesRead);
             // Check bytes for printable characters
@@ -124,15 +121,14 @@ int main(int argc, char *argv[])
         }
 
         bytesSent = 0;
-        total_printables_toNetwork = htonl(total_printables);
-        buffer = (char *) &total_printables_toNetwork;
+        total_printables = htonl(total_printables);
+        buffer = (char *) &total_printables;
         while (1){
-            bytesSent += write(connfd, buffer + bytesRead, total_printables - bytesSent);
-            if (bytesSent == total_printables){
+            bytesSent += write(connfd, buffer + bytesRead, 4 - bytesSent);
+            if (bytesSent == 4){
                 break;
             }
         }
-
         // close socket
         close(connfd);
     }
