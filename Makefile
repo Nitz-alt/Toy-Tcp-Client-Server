@@ -1,5 +1,5 @@
 CC = gcc
-FLAGS = -g -O3 -D_POSIX_C_SOURCE=200809 -Wall -std=c11
+FLAGS = -g -O0 -D_POSIX_C_SOURCE=200809 -Wall -std=c11
 
 
 client.o: pcc_client.c server.o
@@ -9,4 +9,5 @@ server.o: pcc_server.c
 	$(CC) $(FLAGS) pcc_server.c -o server.o
 
 clean:
-	rm *.o
+	rm -f *.o
+	rm -f *.out
