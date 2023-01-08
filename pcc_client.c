@@ -68,47 +68,51 @@ int main(int argc, char *argv[])
     struct stat file_stat;
     char *buffer;
     uint32_t fileSize, printable_char;
-
+    // int reuse;
     struct sockaddr_in serv_addr; // where we Want to get to
+    char *ip_addr = argv[1];
+
 
     port = (uint16_t) atoi(argv[2]);
     file_path = argv[3];
     if (access(file_path, F_OK | R_OK) < 0){
-        // fprintf(stderr, "File does not exists or not readable\n");
         perror(NULL);
         return 1;
     }
 
     if( (sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
     {
-        // fprintf(stderr, "Error : Could not create socket \n");
+        printf("1");
         perror(NULL);
         return 1;
     }
 
-
-    memset(&serv_addr, 0, sizeof(serv_addr));
+    memset(&serv_addr, 0, sizeof(struct sockaddr_in));
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(port); // Note: htons for endiannes
-    inet_pton(AF_INET, argv[1], &(serv_addr.sin_addr.s_addr)); // hardcoded...
+    if (inet_pton(AF_INET, ip_addr, &(serv_addr.sin_addr.s_addr)) < 0){
+        perror("Failed at inet_pton\n");
+        return 1;
+    }
+
 
     // connect socket to the target address
     if( connect(sockfd, (struct sockaddr*) &serv_addr, sizeof(serv_addr)) < 0)
     {
-        // fprintf(stderr, "Error : Connect Failed. %s \n", strerror(errno));
+        printf("2");
         perror(NULL);
         return 1;
     }
     // Opening file to read
     fd = open(file_path, O_RDONLY);
     if (fd < 0){
-        // fprintf(stderr, "Failed at opening file\n");
+        printf("3");
         perror(NULL);
         return 1;
     }
     // Getting file size
     if (fstat(fd, &file_stat) < 0){
-        // fprintf(stderr, "Error getting size of file\n");
+        printf("4");
         perror(NULL);
         close(sockfd);
         close(fd);
@@ -119,7 +123,7 @@ int main(int argc, char *argv[])
     fileSize = htonl(file_stat.st_size);
     buffer = (char *) &fileSize;
     if (write_to_socket(sockfd, buffer, 4) < 0){
-        // fprintf(stderr, "Erorr sending data\n");
+        printf("5");
         perror(NULL);
         return 1;
     }
@@ -127,7 +131,7 @@ int main(int argc, char *argv[])
     // Sending file data
     file_memory = mmap(NULL, file_stat.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
     if (write_to_socket(sockfd, file_memory, file_stat.st_size) < 0){
-        // fprintf(stderr, "Erorr sending data\n");
+        printf("6");
         perror(NULL);
         munmap(file_memory, file_stat.st_size);
         close(sockfd);
@@ -138,7 +142,7 @@ int main(int argc, char *argv[])
     // Getting # of printable characters
     buffer = (char *) &printable_char;
     if (read_from_socket(sockfd, buffer, 4) < 0){
-        // fprintf(stderr, "Error reading data data\n");
+        printf("7");
         perror(NULL);
         munmap(file_memory, file_stat.st_size);
         close(sockfd);

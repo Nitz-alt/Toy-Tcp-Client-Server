@@ -14,6 +14,7 @@
 
 int EXIT = 0;
 uint32_t *pcc_total;
+int listenfd;
 
 
 void setExit(int  signum){
@@ -25,6 +26,7 @@ void print_counts_and_exit(int signum){
         printf("char '%c' : %u times\n", (char) i + 32, pcc_total[i]);
     }
     free(pcc_total);
+    close(listenfd);
     exit(0);
 }
 
@@ -35,11 +37,10 @@ int main(int argc, char *argv[])
     // Validating correct number of arguments:
     if (argc != 2){
         fprintf(stderr, "Number of arguments not valid.\n");
-        return 1;
+        exit(1);
     }
 
 
-    int listenfd  = -1;
     int connfd    = -1;
 
     struct sockaddr_in serv_addr;
@@ -53,63 +54,69 @@ int main(int argc, char *argv[])
     char charater;
     uint32_t total_printables;
     int reuse;
+    uint32_t *pcc_total_atm;
+
     struct sigaction sa_mid, sa_finish;
     sa_mid.sa_handler = setExit;
     sigemptyset(&sa_mid.sa_mask);
     sa_finish.sa_handler = print_counts_and_exit;
     sigemptyset(&sa_finish.sa_mask);
 
-    sigaction(SIGINT, &sa_finish, NULL);
+    if (sigaction(SIGINT, &sa_finish, NULL) < 0){
+        perror("Failed at sigaction\n");
+        return 1;
+    }
 
     listenfd = socket( AF_INET, SOCK_STREAM, 0 );
-    memset( &serv_addr, 0, addrsize );
 
+    memset( &serv_addr, 0, addrsize );
     serv_addr.sin_family = AF_INET;
-    // INADDR_ANY = any local machine address
     serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
     serv_addr.sin_port = htons(port);
 
     // Setting socket so port can be used again
     if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (const void *) &reuse, sizeof(int)) < 0){
-        // writeError("setsocketopt failed\n");
+        printf("1s");
         perror(NULL);
         close(listenfd);
-        return 1;
+        exit(1);
     }
 
-    if( 0 != bind( listenfd,
-                    (struct sockaddr*) &serv_addr,
-                    addrsize ) )
+    if( 0 != bind( listenfd, (struct sockaddr*) &serv_addr, addrsize ) )
     {
-        // printf("\n Error : Bind Failed. %s \n", strerror(errno));/
+        printf("2s");
         perror(NULL);
         close(listenfd);
-        return 1;
+        exit(1);
     }
 
     if( 0 != listen( listenfd, 10 ) )
     {
-        // printf("\n Error : Listen Failed. %s \n", strerror(errno));
+        printf("3s");
         perror(NULL);
         close(listenfd);
-        return 1;
+        exit(1);
     }
 
 
     pcc_total = calloc(sizeof(uint32_t), 95);
+    pcc_total_atm = calloc(sizeof(uint32_t), 95);
     data_buff = malloc(ONE_MB);
     while(1)
     {
         // Accept a connection.
         connfd = accept( listenfd, NULL, NULL);
-        sigaction(SIGINT, &sa_mid, NULL);
+        if (sigaction(SIGINT, &sa_mid, NULL) < 0){
+            perror("Failed at sigaction\n");
+            return 1;
+        }
         
         if( connfd < 0 )
         {
-        // printf("\n Error : Accept Failed. %s \n", strerror(errno));
-        perror(NULL);
-        close(listenfd);
-        return 1;
+            printf("4s");
+            perror(NULL);
+            close(listenfd);
+            exit(1);
         }
         // Reading number of bytes
         buffer = (char *) &file_size;
@@ -117,12 +124,13 @@ int main(int argc, char *argv[])
         while(1){
             bytesRead += read(connfd, buffer + bytesRead, 4 - bytesRead);
             if (bytesSent < 0){
+                printf("5s");
                 perror(NULL);
                 close(connfd);
                 close(listenfd);
-                return 1;
+                exit(1);
             }
-            if (bytesRead == 4){
+            if (bytesRead == 4 || bytesRead == 0){
                 break;
             }
         }
@@ -135,22 +143,22 @@ int main(int argc, char *argv[])
         while(1){
             bytesRead = read(connfd, buffer, file_size - totalBytesRead);
             if (bytesRead < 0){
-                // fprintf(stderr, "Connection was close\n");
+                printf("6s");
                 perror(NULL);
                 close(connfd);
                 close(listenfd);
-                return 1;
+                exit(1);
             }
             // Check bytes for printable characters
             for (int i = 0 ; i < bytesRead; i++){
                 charater = buffer[i];
                 if (IS_PRINTABLE_CHAR(charater)){
-                    pcc_total[charater - 32]++;
+                    pcc_total_atm[charater - 32]++;
                     total_printables++;
                 }
             }
             totalBytesRead += bytesRead;
-            if (totalBytesRead == file_size){
+            if (totalBytesRead == file_size || bytesRead == 0){
                 break;
             }
         }
@@ -162,20 +170,26 @@ int main(int argc, char *argv[])
         while (1){
             bytesSent = write(connfd, buffer + totalBytesSent, 4 - bytesSent);
             if (bytesSent < 0){
-                // fprintf(stderr, "Error at writing to socket\n");
+                printf("7s");
                 perror(NULL);
                 close(connfd);
                 close(listenfd);
-                return 1;
+                exit(1);
             }
             totalBytesSent += bytesSent;
             if (totalBytesSent == 4){
                 break;
             }
         }
-        // close socket
         close(connfd);
         sigaction(SIGINT, &sa_finish, NULL);
+
+        // Copying result
+        for (int i = 0; i < 95; i++){
+            pcc_total[i] += pcc_total_atm[i];
+        }
+        memset(pcc_total_atm, 0, sizeof(uint32_t) * 95);
+
         if (EXIT){
             print_counts_and_exit(SIGINT);
         }
