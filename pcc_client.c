@@ -25,7 +25,7 @@ int read_from_socket(int socket_fd, char * buffer, size_t bytes_num){
     int totalBytes = 0;
     while(1){
         bytes = read(socket_fd, buffer + totalBytes, bytes_num - totalBytes);
-        if (bytes < 0){
+        if (bytes == 0 || (bytes == -1 && (errno == ETIMEDOUT || errno == ECONNRESET || errno == EPIPE))){
             return -1;
         }
         totalBytes += bytes;
@@ -41,7 +41,7 @@ int write_to_socket(int socket_fd, char * buffer, size_t bytes_num){
     int totalBytes = 0;
     while(1){
         bytes = write(socket_fd, buffer + totalBytes, bytes_num - totalBytes);
-        if (bytes < 0){
+        if (bytes == 0 || (bytes == -1 && (errno == ETIMEDOUT || errno == ECONNRESET || errno == EPIPE))){
             return -1;
         }
         totalBytes += bytes;
@@ -82,8 +82,7 @@ int main(int argc, char *argv[])
 
     if( (sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
     {
-        printf("1");
-        perror(NULL);
+        perror("Creating socket failed\n");
         return 1;
     }
 
@@ -92,28 +91,27 @@ int main(int argc, char *argv[])
     serv_addr.sin_port = htons(port); // Note: htons for endiannes
     if (inet_pton(AF_INET, ip_addr, &(serv_addr.sin_addr.s_addr)) < 0){
         perror("Failed at inet_pton\n");
+        close(sockfd);
         return 1;
     }
 
 
     // connect socket to the target address
-    if( connect(sockfd, (struct sockaddr*) &serv_addr, sizeof(serv_addr)) < 0)
-    {
-        printf("2");
-        perror(NULL);
+    if(connect(sockfd, (struct sockaddr*) &serv_addr, sizeof(serv_addr)) < 0){   
+        perror("Connecting failed\n");
+        close(sockfd);
         return 1;
     }
     // Opening file to read
     fd = open(file_path, O_RDONLY);
     if (fd < 0){
-        printf("3");
-        perror(NULL);
+        perror("Erorr opening file\n");
         return 1;
     }
+
     // Getting file size
     if (fstat(fd, &file_stat) < 0){
-        printf("4");
-        perror(NULL);
+        perror("Error at fstat\n");
         close(sockfd);
         close(fd);
         return 1;
@@ -123,16 +121,14 @@ int main(int argc, char *argv[])
     fileSize = htonl(file_stat.st_size);
     buffer = (char *) &fileSize;
     if (write_to_socket(sockfd, buffer, 4) < 0){
-        printf("5");
-        perror(NULL);
+        perror("Failed at sending data to server\n");
         return 1;
     }
 
     // Sending file data
     file_memory = mmap(NULL, file_stat.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
     if (write_to_socket(sockfd, file_memory, file_stat.st_size) < 0){
-        printf("6");
-        perror(NULL);
+        perror("Failed at sending data to server\n");
         munmap(file_memory, file_stat.st_size);
         close(sockfd);
         close(fd);
@@ -142,8 +138,7 @@ int main(int argc, char *argv[])
     // Getting # of printable characters
     buffer = (char *) &printable_char;
     if (read_from_socket(sockfd, buffer, 4) < 0){
-        printf("7");
-        perror(NULL);
+        perror("Error reading data from server\n");
         munmap(file_memory, file_stat.st_size);
         close(sockfd);
         close(fd);

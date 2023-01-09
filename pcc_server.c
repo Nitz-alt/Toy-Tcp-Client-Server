@@ -11,6 +11,7 @@
 
 #define IS_PRINTABLE_CHAR(X) ((32 <= X) && (X <= 126))
 #define ONE_MB 0x100000
+#define MIN(X,Y) ((X) < (Y) ? (X) : (Y))
 
 int EXIT = 0;
 uint32_t *pcc_total;
@@ -28,6 +29,39 @@ void print_counts_and_exit(int signum){
     free(pcc_total);
     close(listenfd);
     exit(0);
+}
+
+
+int read_from_socket(int socket_fd, char * buffer, size_t bytes_num){
+    int bytes = 0;
+    int totalBytes = 0;
+    while(1){
+        bytes = read(socket_fd, buffer + totalBytes, bytes_num - totalBytes);
+        if (bytes == 0 || (bytes == -1 && (errno == ETIMEDOUT || errno == ECONNRESET || errno == EPIPE))){
+            return -1;
+        }
+        totalBytes += bytes;
+        if (totalBytes == bytes_num){
+            break;
+        }
+    }
+    return 0;
+}
+
+int write_to_socket(int socket_fd, char * buffer, size_t bytes_num){
+    int bytes = 0;
+    int totalBytes = 0;
+    while(1){
+        bytes = write(socket_fd, buffer + totalBytes, bytes_num - totalBytes);
+        if (bytes == 0 || (bytes == -1 && (errno == ETIMEDOUT || errno == ECONNRESET || errno == EPIPE))){
+            return -1;
+        }
+        totalBytes += bytes;
+        if (totalBytes == bytes_num){
+            break;
+        }
+    }
+    return 0;
 }
 
 
@@ -49,12 +83,13 @@ int main(int argc, char *argv[])
     char *data_buff;
     uint16_t port = atoi(argv[1]);
     uint32_t file_size;
-    ssize_t bytesRead, totalBytesRead, bytesSent, totalBytesSent;
+    ssize_t bytesRead, totalBytesRead;
     char *buffer;
     char charater;
     uint32_t total_printables;
     int reuse;
     uint32_t *pcc_total_atm;
+    uint32_t current_bytes_read_count;
 
     struct sigaction sa_mid, sa_finish;
     sa_mid.sa_handler = setExit;
@@ -76,24 +111,19 @@ int main(int argc, char *argv[])
 
     // Setting socket so port can be used again
     if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (const void *) &reuse, sizeof(int)) < 0){
-        printf("1s");
-        perror(NULL);
+        perror("Error at setting socket\n");
         close(listenfd);
         exit(1);
     }
 
-    if( 0 != bind( listenfd, (struct sockaddr*) &serv_addr, addrsize ) )
-    {
-        printf("2s");
-        perror(NULL);
+    if( 0 != bind(listenfd, (struct sockaddr*) &serv_addr, addrsize ) ){
+        perror("Error at binding socket\n");
         close(listenfd);
         exit(1);
     }
 
-    if( 0 != listen( listenfd, 10 ) )
-    {
-        printf("3s");
-        perror(NULL);
+    if(0 != listen( listenfd, 10 )){
+        perror("Error at listening\n");
         close(listenfd);
         exit(1);
     }
@@ -102,52 +132,44 @@ int main(int argc, char *argv[])
     pcc_total = calloc(sizeof(uint32_t), 95);
     pcc_total_atm = calloc(sizeof(uint32_t), 95);
     data_buff = malloc(ONE_MB);
-    while(1)
-    {
+    while(1){
         // Accept a connection.
         connfd = accept( listenfd, NULL, NULL);
-        if (sigaction(SIGINT, &sa_mid, NULL) < 0){
-            perror("Failed at sigaction\n");
-            return 1;
-        }
-        
-        if( connfd < 0 )
-        {
-            printf("4s");
+
+        if( connfd < 0 ){
             perror(NULL);
             close(listenfd);
             exit(1);
         }
+
+        if (sigaction(SIGINT, &sa_mid, NULL) < 0){
+            close(connfd);
+            close(listenfd);
+            perror("Failed at sigaction\n");
+            return 1;
+        }
+        
+
         // Reading number of bytes
         buffer = (char *) &file_size;
-        bytesRead = 0;
-        while(1){
-            bytesRead += read(connfd, buffer + bytesRead, 4 - bytesRead);
-            if (bytesSent < 0){
-                printf("5s");
-                perror(NULL);
-                close(connfd);
-                close(listenfd);
-                exit(1);
-            }
-            if (bytesRead == 4 || bytesRead == 0){
-                break;
-            }
+        if (read_from_socket(connfd, buffer, 4) < 0){
+            close(connfd);
+            continue;
         }
         file_size = ntohl(file_size);
 
+        // Reading file data from client (in batches of 1MB)
         bytesRead = 0;
         totalBytesRead = 0;
         buffer = data_buff;
         total_printables = 0;
-        while(1){
-            bytesRead = read(connfd, buffer, file_size - totalBytesRead);
+        current_bytes_read_count = 0;
+        while(totalBytesRead < file_size){
+            current_bytes_read_count = MIN(ONE_MB, file_size - totalBytesRead);
+            bytesRead = read_from_socket(connfd, buffer, current_bytes_read_count);
             if (bytesRead < 0){
-                printf("6s");
-                perror(NULL);
                 close(connfd);
-                close(listenfd);
-                exit(1);
+                break;
             }
             // Check bytes for printable characters
             for (int i = 0 ; i < bytesRead; i++){
@@ -158,31 +180,23 @@ int main(int argc, char *argv[])
                 }
             }
             totalBytesRead += bytesRead;
-            if (totalBytesRead == file_size || bytesRead == 0){
-                break;
-            }
+        }
+        if (bytesRead < 0){
+            perror("TCP Error occured\n");
+            close(connfd);
+            continue;
         }
 
-        bytesSent = 0;
-        totalBytesSent = 0;
+        // Sending # of printables to the client
         total_printables = htonl(total_printables);
         buffer = (char *) &total_printables;
-        while (1){
-            bytesSent = write(connfd, buffer + totalBytesSent, 4 - bytesSent);
-            if (bytesSent < 0){
-                printf("7s");
-                perror(NULL);
-                close(connfd);
-                close(listenfd);
-                exit(1);
-            }
-            totalBytesSent += bytesSent;
-            if (totalBytesSent == 4){
-                break;
-            }
+        if (write_to_socket(connfd, buffer, 4) < 0){
+            close(connfd);
+            perror("TCP Error occured\n");
+            continue;
         }
+
         close(connfd);
-        sigaction(SIGINT, &sa_finish, NULL);
 
         // Copying result
         for (int i = 0; i < 95; i++){
@@ -190,6 +204,12 @@ int main(int argc, char *argv[])
         }
         memset(pcc_total_atm, 0, sizeof(uint32_t) * 95);
 
+        if (sigaction(SIGINT, &sa_finish, NULL) < 0){
+            perror("Error at setting signal handler\n");
+            close(connfd);
+            close(listenfd);
+            return 1;
+        }
         if (EXIT){
             print_counts_and_exit(SIGINT);
         }
