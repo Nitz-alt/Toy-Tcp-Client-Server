@@ -15,6 +15,9 @@
 
 typedef ssize_t (*socket_op) (int, void *, size_t);
 
+#define ONE_MB 0x100000
+#define MIN(X,Y) ((X) < (Y) ? (X) : (Y))
+
 
 int read_from_socket(int socket_fd, char * buffer, size_t bytes_num){
     int bytes = 0;
@@ -68,6 +71,7 @@ int main(int argc, char *argv[])
     struct sockaddr_in serv_addr; // where we Want to get to
     char *ip_addr = argv[1];
     int reuse;
+    int totalBytes_sent = 0, bytes_sent = 0, current_bytes_num_send;
 
 
     port = (uint16_t) atoi(argv[2]);
@@ -88,20 +92,20 @@ int main(int argc, char *argv[])
     serv_addr.sin_port = htons(port); // Note: htons for endiannes
     if (inet_pton(AF_INET, ip_addr, &(serv_addr.sin_addr.s_addr)) < 0){
         perror("CLIENT: Failed at inet_pton ");
-        // close(sockfd);
+        close(sockfd);
         return 1;
     }
 
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (const void *) &reuse, sizeof(int)) < 0){
         perror("CLIENT: Error at setting socket");
-        // close(sockfd);
+        close(sockfd);
         exit(1);
     }
 
     // connect socket to the target address
     if(connect(sockfd, (struct sockaddr*) &serv_addr, sizeof(serv_addr)) < 0){   
         perror("CLIENT: Connecting failed ");
-        // close(sockfd);
+        close(sockfd);
         return 1;
     }
     // Opening file to read
@@ -114,8 +118,8 @@ int main(int argc, char *argv[])
     // Getting file size
     if (fstat(fd, &file_stat) < 0){
         perror("CLIENT: Error at fstat ");
-        // close(sockfd);
-        // close(fd);
+        close(sockfd);
+        close(fd);
         return 1;
     }
 
@@ -128,13 +132,22 @@ int main(int argc, char *argv[])
     }
 
     // Sending file data
-    file_memory = mmap(NULL, file_stat.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    if (write_to_socket(sockfd, file_memory, file_stat.st_size) < 0){
-        perror("CLIENT: Failed at sending data to server ");
-        munmap(file_memory, file_stat.st_size);
-        // close(sockfd);
-        // close(fd);
-        return 1;
+    totalBytes_sent = 0;
+    bytes_sent = 0;
+    current_bytes_num_send = 0;
+    while (totalBytes_sent < file_stat.st_size){
+        current_bytes_num_send = MIN(ONE_MB, file_stat.st_size - totalBytes_sent);
+        file_memory = mmap(NULL, current_bytes_num_send, PROT_READ, MAP_PRIVATE, fd, totalBytes_sent);
+        bytes_sent = write_to_socket(sockfd, file_memory, current_bytes_num_send);
+        if (bytes_sent < 0){
+            perror("CLIENT: Failed at sending data to server ");
+            munmap(file_memory, file_stat.st_size);
+            close(sockfd);
+            close(fd);
+            return 1;
+        }
+        totalBytes_sent += bytes_sent;
+        munmap(file_memory, current_bytes_num_send);
     }
 
     // Getting # of printable characters
@@ -142,8 +155,8 @@ int main(int argc, char *argv[])
     if (read_from_socket(sockfd, buffer, 4) < 0){
         perror("CLIENT: Error reading data from server ");
         // munmap(file_memory, file_stat.st_size);
-        // close(sockfd);
-        // close(fd);
+        close(sockfd);
+        close(fd);
         return 1;
     }
     printable_char = ntohl(printable_char);
@@ -151,8 +164,7 @@ int main(int argc, char *argv[])
     // Printing # number of printable chars
     printf("# of printable characters: %u\n", printable_char);
     
-    munmap(file_memory, file_stat.st_size);
-    // close(fd);
-    // close(sockfd);
+    close(fd);
+    close(sockfd);
     return 0;
 }

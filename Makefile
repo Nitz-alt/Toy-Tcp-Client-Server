@@ -11,3 +11,4 @@ server.o: pcc_server.c
 clean:
 	rm -f *.o
 	rm -f *.out
+	rm -rf random_files/ client  file_for_tests  server

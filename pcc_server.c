@@ -26,9 +26,9 @@ void print_counts_and_exit(int signum){
     for (int i = 0; i <= 95; i++){
         printf("char '%c' : %u times\n", (char) i + 32, pcc_total[i]);
     }
-    // free(pcc_total);
-    // close(listenfd);
-    // close(connfd);
+    free(pcc_total);
+    close(listenfd);
+    close(connfd);
     exit(0);
 }
 
@@ -116,19 +116,19 @@ int main(int argc, char *argv[])
     // Setting socket so port can be used again
     if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (const void *) &reuse, sizeof(int)) < 0){
         perror("SERVER: Error at setting socket");
-        // close(listenfd);
+        close(listenfd);
         exit(1);
     }
 
     if( 0 != bind(listenfd, (struct sockaddr*) &serv_addr, addrsize ) ){
         perror("SERVER: Error at binding socket");
-        // close(listenfd);
+        close(listenfd);
         exit(1);
     }
 
     if(0 != listen( listenfd, 10 )){
         perror("SERVER: Error at listening");
-        // close(listenfd);
+        close(listenfd);
         exit(1);
     }
 
@@ -151,8 +151,8 @@ int main(int argc, char *argv[])
 
         if (sigaction(SIGINT, &sa_mid, NULL) < 0){
             perror("SERVER: Failed at sigaction");
-            // close(connfd);
-            // close(listenfd);
+            close(connfd);
+            close(listenfd);
             return 1;
         }
         
@@ -161,7 +161,7 @@ int main(int argc, char *argv[])
         buffer = (char *) &file_size;
         if (read_from_socket(connfd, buffer, 4) < 0){
             perror("SERVER: Error at reading from client");
-            // close(connfd);
+            close(connfd);
             continue;
         }
         file_size = ntohl(file_size);
@@ -172,6 +172,7 @@ int main(int argc, char *argv[])
         buffer = data_buff;
         total_printables = 0;
         current_bytes_read_count = 0;
+        memset(pcc_total_atm, 0, sizeof(uint32_t) * 95);
         while(totalBytesRead < file_size){
             current_bytes_read_count = MIN(ONE_MB, file_size - totalBytesRead);
             bytesRead = read_from_socket(connfd, buffer, current_bytes_read_count);
@@ -190,7 +191,7 @@ int main(int argc, char *argv[])
         }
         if (bytesRead < 0){
             perror("SERVER: TCP Error occured");
-            // close(connfd);
+            close(connfd);
             continue;
         }
 
@@ -199,7 +200,7 @@ int main(int argc, char *argv[])
         buffer = (char *) &total_printables;
         if (write_to_socket(connfd, buffer, 4) < 0){
             perror("SERVER: TCP Error occured");
-            // close(connfd);
+            close(connfd);
             continue;
         }
 
@@ -207,18 +208,17 @@ int main(int argc, char *argv[])
         for (int i = 0; i < 95; i++){
             pcc_total[i] += pcc_total_atm[i];
         }
-        memset(pcc_total_atm, 0, sizeof(uint32_t) * 95);
 
         if (sigaction(SIGINT, &sa_finish, NULL) < 0){
             perror("SERVER: Error at setting signal handler");
-            // close(connfd);
-            // close(listenfd);
+            close(connfd);
+            close(listenfd);
             return 1;
         }
         if (EXIT){
             print_counts_and_exit(SIGINT);
         }
-        // close(connfd);
+        close(connfd);
     }
-    // close(listenfd);
+    close(listenfd);
 }
