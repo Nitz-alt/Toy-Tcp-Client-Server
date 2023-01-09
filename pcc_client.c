@@ -16,10 +16,6 @@
 typedef ssize_t (*socket_op) (int, void *, size_t);
 
 
-void writeError(char *msg){
-    fprintf(stderr, msg, NULL);
-}
-
 int read_from_socket(int socket_fd, char * buffer, size_t bytes_num){
     int bytes = 0;
     int totalBytes = 0;
@@ -33,7 +29,7 @@ int read_from_socket(int socket_fd, char * buffer, size_t bytes_num){
             break;
         }
     }
-    return 0;
+    return totalBytes;
 }
 
 int write_to_socket(int socket_fd, char * buffer, size_t bytes_num){
@@ -49,7 +45,7 @@ int write_to_socket(int socket_fd, char * buffer, size_t bytes_num){
             break;
         }
     }
-    return 0;
+    return totalBytes;
 }
 
 
@@ -71,18 +67,19 @@ int main(int argc, char *argv[])
     // int reuse;
     struct sockaddr_in serv_addr; // where we Want to get to
     char *ip_addr = argv[1];
+    int reuse;
 
 
     port = (uint16_t) atoi(argv[2]);
     file_path = argv[3];
     if (access(file_path, F_OK | R_OK) < 0){
-        perror(NULL);
+        perror("CLIENT: No permissions ");
         return 1;
     }
 
     if( (sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
     {
-        perror("Creating socket failed\n");
+        perror("CLIENT: Creating socket failed ");
         return 1;
     }
 
@@ -90,30 +87,35 @@ int main(int argc, char *argv[])
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(port); // Note: htons for endiannes
     if (inet_pton(AF_INET, ip_addr, &(serv_addr.sin_addr.s_addr)) < 0){
-        perror("Failed at inet_pton\n");
-        close(sockfd);
+        perror("CLIENT: Failed at inet_pton ");
+        // close(sockfd);
         return 1;
     }
 
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (const void *) &reuse, sizeof(int)) < 0){
+        perror("CLIENT: Error at setting socket");
+        // close(sockfd);
+        exit(1);
+    }
 
     // connect socket to the target address
     if(connect(sockfd, (struct sockaddr*) &serv_addr, sizeof(serv_addr)) < 0){   
-        perror("Connecting failed\n");
-        close(sockfd);
+        perror("CLIENT: Connecting failed ");
+        // close(sockfd);
         return 1;
     }
     // Opening file to read
     fd = open(file_path, O_RDONLY);
     if (fd < 0){
-        perror("Erorr opening file\n");
+        perror("CLIENT: Erorr opening file ");
         return 1;
     }
 
     // Getting file size
     if (fstat(fd, &file_stat) < 0){
-        perror("Error at fstat\n");
-        close(sockfd);
-        close(fd);
+        perror("CLIENT: Error at fstat ");
+        // close(sockfd);
+        // close(fd);
         return 1;
     }
 
@@ -121,27 +123,27 @@ int main(int argc, char *argv[])
     fileSize = htonl(file_stat.st_size);
     buffer = (char *) &fileSize;
     if (write_to_socket(sockfd, buffer, 4) < 0){
-        perror("Failed at sending data to server\n");
+        perror("CLIENT: Failed at sending data to server ");
         return 1;
     }
 
     // Sending file data
     file_memory = mmap(NULL, file_stat.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
     if (write_to_socket(sockfd, file_memory, file_stat.st_size) < 0){
-        perror("Failed at sending data to server\n");
+        perror("CLIENT: Failed at sending data to server ");
         munmap(file_memory, file_stat.st_size);
-        close(sockfd);
-        close(fd);
+        // close(sockfd);
+        // close(fd);
         return 1;
     }
 
     // Getting # of printable characters
     buffer = (char *) &printable_char;
     if (read_from_socket(sockfd, buffer, 4) < 0){
-        perror("Error reading data from server\n");
-        munmap(file_memory, file_stat.st_size);
-        close(sockfd);
-        close(fd);
+        perror("CLIENT: Error reading data from server ");
+        // munmap(file_memory, file_stat.st_size);
+        // close(sockfd);
+        // close(fd);
         return 1;
     }
     printable_char = ntohl(printable_char);
@@ -150,7 +152,7 @@ int main(int argc, char *argv[])
     printf("# of printable characters: %u\n", printable_char);
     
     munmap(file_memory, file_stat.st_size);
-    close(fd);
-    close(sockfd);
+    // close(fd);
+    // close(sockfd);
     return 0;
 }
