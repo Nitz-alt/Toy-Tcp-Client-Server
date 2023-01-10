@@ -67,13 +67,11 @@ int main(int argc, char *argv[])
     struct stat file_stat;
     char *buffer;
     uint32_t fileSize, printable_char;
-    // int reuse;
     struct sockaddr_in serv_addr; // where we Want to get to
-    char *ip_addr = argv[1];
     int reuse;
     int totalBytes_sent = 0, bytes_sent = 0, current_bytes_num_send;
 
-
+    char *ip_addr = argv[1];
     port = (uint16_t) atoi(argv[2]);
     file_path = argv[3];
     if (access(file_path, F_OK | R_OK) < 0){
@@ -96,11 +94,11 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (const void *) &reuse, sizeof(int)) < 0){
-        perror("CLIENT: Error at setting socket");
-        close(sockfd);
-        exit(1);
-    }
+    // if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (const void *) &reuse, sizeof(int)) < 0){
+    //     perror("CLIENT: Error at setting socket");
+    //     close(sockfd);
+    //     exit(1);
+    // }
 
     // connect socket to the target address
     if(connect(sockfd, (struct sockaddr*) &serv_addr, sizeof(serv_addr)) < 0){   

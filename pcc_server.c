@@ -151,8 +151,8 @@ int main(int argc, char *argv[])
 
         if (sigaction(SIGINT, &sa_mid, NULL) < 0){
             perror("SERVER: Failed at sigaction");
-            close(connfd);
             close(listenfd);
+            close(connfd);
             return 1;
         }
         
@@ -203,6 +203,7 @@ int main(int argc, char *argv[])
             close(connfd);
             continue;
         }
+        close(connfd);
 
         // Copying result
         for (int i = 0; i < 95; i++){
@@ -211,14 +212,13 @@ int main(int argc, char *argv[])
 
         if (sigaction(SIGINT, &sa_finish, NULL) < 0){
             perror("SERVER: Error at setting signal handler");
-            close(connfd);
             close(listenfd);
+            close(connfd);
             return 1;
         }
         if (EXIT){
             print_counts_and_exit(SIGINT);
         }
-        close(connfd);
     }
     close(listenfd);
 }
