@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <assert.h>
 
 typedef ssize_t (*socket_op) (int, void *, size_t);
 
@@ -62,14 +63,14 @@ int main(int argc, char *argv[])
     }
     int  sockfd     = -1;
     uint16_t port;
-    char *file_path, *file_memory;
+    char *file_path, file_buffer[ONE_MB];
     int fd;
     struct stat file_stat;
     char *buffer;
     uint32_t fileSize, printable_char;
     struct sockaddr_in serv_addr; // where we Want to get to
     int reuse;
-    int totalBytes_sent = 0, bytes_sent = 0, current_bytes_num_send;
+    int totalBytes_sent = 0, bytes_sent = 0, current_bytes_num_read;
 
     char *ip_addr = argv[1];
     port = (uint16_t) atoi(argv[2]);
@@ -94,11 +95,11 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    // if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (const void *) &reuse, sizeof(int)) < 0){
-    //     perror("CLIENT: Error at setting socket");
-    //     close(sockfd);
-    //     exit(1);
-    // }
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (const void *) &reuse, sizeof(int)) < 0){
+        perror("CLIENT: Error at setting socket");
+        close(sockfd);
+        exit(1);
+    }
 
     // connect socket to the target address
     if(connect(sockfd, (struct sockaddr*) &serv_addr, sizeof(serv_addr)) < 0){   
@@ -132,20 +133,19 @@ int main(int argc, char *argv[])
     // Sending file data
     totalBytes_sent = 0;
     bytes_sent = 0;
-    current_bytes_num_send = 0;
+    current_bytes_num_read = 0;
     while (totalBytes_sent < file_stat.st_size){
-        current_bytes_num_send = MIN(ONE_MB, file_stat.st_size - totalBytes_sent);
-        file_memory = mmap(NULL, current_bytes_num_send, PROT_READ, MAP_PRIVATE, fd, totalBytes_sent);
-        bytes_sent = write_to_socket(sockfd, file_memory, current_bytes_num_send);
+        // Change to read
+        current_bytes_num_read = read(fd, file_buffer, ONE_MB);
+        bytes_sent = write_to_socket(sockfd, file_buffer, current_bytes_num_read);
         if (bytes_sent < 0){
             perror("CLIENT: Failed at sending data to server ");
-            munmap(file_memory, file_stat.st_size);
             close(sockfd);
             close(fd);
             return 1;
         }
+        assert(current_bytes_num_read == bytes_sent);
         totalBytes_sent += bytes_sent;
-        munmap(file_memory, current_bytes_num_send);
     }
 
     // Getting # of printable characters
