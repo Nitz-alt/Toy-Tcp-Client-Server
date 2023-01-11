@@ -9,7 +9,7 @@
 #include <sys/types.h>
 #include <signal.h>
 
-#define IS_PRINTABLE_CHAR(X) ((32 <= X) && (X <= 126))
+#define IS_PRINTABLE_CHAR(X) ((32 <= (X)) && ((X) <= 126))
 #define ONE_MB 0x100000
 #define MIN(X,Y) ((X) < (Y) ? (X) : (Y))
 
@@ -26,9 +26,6 @@ void print_counts_and_exit(int signum){
     for (int i = 0; i <= 95; i++){
         printf("char '%c' : %u times\n", (char) i + 32, pcc_total[i]);
     }
-    // free(pcc_total);
-    // close(listenfd);
-    // close(connfd);
     exit(0);
 }
 
@@ -38,7 +35,10 @@ int read_from_socket(int socket_fd, char * buffer, size_t bytes_num){
     int totalBytes = 0;
     while(1){
         bytes = read(socket_fd, buffer + totalBytes, bytes_num - totalBytes);
-        if (bytes == 0 || (bytes == -1 && (errno == ETIMEDOUT || errno == ECONNRESET || errno == EPIPE))){
+        if (bytes == 0 ){
+            return 0;
+        }
+        if ((bytes == -1 && (errno == ETIMEDOUT || errno == ECONNRESET || errno == EPIPE))){
             return -1;
         }
         totalBytes += bytes;
@@ -116,19 +116,19 @@ int main(int argc, char *argv[])
     // Setting socket so port can be used again
     if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (const void *) &reuse, sizeof(int)) < 0){
         perror("SERVER: Error at setting socket");
-        // close(listenfd);
+        close(listenfd);
         exit(1);
     }
 
     if( 0 != bind(listenfd, (struct sockaddr*) &serv_addr, addrsize ) ){
         perror("SERVER: Error at binding socket");
-        // close(listenfd);
+        close(listenfd);
         exit(1);
     }
 
     if(0 != listen( listenfd, 10 )){
         perror("SERVER: Error at listening");
-        // close(listenfd);
+        close(listenfd);
         exit(1);
     }
 
@@ -151,17 +151,17 @@ int main(int argc, char *argv[])
 
         if (sigaction(SIGINT, &sa_mid, NULL) < 0){
             perror("SERVER: Failed at sigaction");
-            // close(connfd);
-            // close(listenfd);
+            close(connfd);
+            close(listenfd);
             return 1;
         }
         
 
         // Reading number of bytes
         buffer = (char *) &file_size;
-        if (read_from_socket(connfd, buffer, 4) < 0){
+        if (read_from_socket(connfd, buffer, 4) <= 0){
             perror("SERVER: Error at reading from client");
-            // close(connfd);
+            close(connfd);
             continue;
         }
         file_size = ntohl(file_size);
@@ -172,10 +172,11 @@ int main(int argc, char *argv[])
         buffer = data_buff;
         total_printables = 0;
         current_bytes_read_count = 0;
+        
         while(totalBytesRead < file_size){
             current_bytes_read_count = MIN(ONE_MB, file_size - totalBytesRead);
             bytesRead = read_from_socket(connfd, buffer, current_bytes_read_count);
-            if (bytesRead < 0){
+            if (bytesRead <= 0){
                 break;
             }
             // Check bytes for printable characters
@@ -188,18 +189,18 @@ int main(int argc, char *argv[])
             }
             totalBytesRead += bytesRead;
         }
-        if (bytesRead < 0){
+        if (bytesRead <= 0){
             perror("SERVER: TCP Error occured");
-            // close(connfd);
+            close(connfd);
             continue;
         }
 
         // Sending # of printables to the client
         total_printables = htonl(total_printables);
         buffer = (char *) &total_printables;
-        if (write_to_socket(connfd, buffer, 4) < 0){
+        if (write_to_socket(connfd, buffer, 4) <= 0){
             perror("SERVER: TCP Error occured");
-            // close(connfd);
+            close(connfd);
             continue;
         }
 
@@ -208,17 +209,16 @@ int main(int argc, char *argv[])
             pcc_total[i] += pcc_total_atm[i];
         }
         memset(pcc_total_atm, 0, sizeof(uint32_t) * 95);
+        close(connfd);
 
         if (sigaction(SIGINT, &sa_finish, NULL) < 0){
             perror("SERVER: Error at setting signal handler");
-            // close(connfd);
-            // close(listenfd);
+            close(connfd);
+            close(listenfd);
             return 1;
         }
         if (EXIT){
             print_counts_and_exit(SIGINT);
         }
-        // close(connfd);
     }
-    // close(listenfd);
 }

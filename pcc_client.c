@@ -64,7 +64,6 @@ int main(int argc, char *argv[])
     struct stat file_stat;
     char *buffer;
     uint32_t fileSize, printable_char;
-    // int reuse;
     struct sockaddr_in serv_addr; // where we Want to get to
     char *ip_addr = argv[1];
     int reuse;
