@@ -12,8 +12,12 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <assert.h>
+#include <signal.h>
 
 typedef ssize_t (*socket_op) (int, void *, size_t);
+#define ONE_MB 0x100000
+
 
 
 int read_from_socket(int socket_fd, char * buffer, size_t bytes_num){
@@ -21,7 +25,10 @@ int read_from_socket(int socket_fd, char * buffer, size_t bytes_num){
     int totalBytes = 0;
     while(1){
         bytes = read(socket_fd, buffer + totalBytes, bytes_num - totalBytes);
-        if (bytes == 0 || (bytes == -1 && (errno == ETIMEDOUT || errno == ECONNRESET || errno == EPIPE))){
+        if (bytes == 0){
+            return 0;
+        }
+        if ((bytes == -1 && (errno == ETIMEDOUT || errno == ECONNRESET || errno == EPIPE))){
             return -1;
         }
         totalBytes += bytes;
@@ -37,7 +44,10 @@ int write_to_socket(int socket_fd, char * buffer, size_t bytes_num){
     int totalBytes = 0;
     while(1){
         bytes = write(socket_fd, buffer + totalBytes, bytes_num - totalBytes);
-        if (bytes == 0 || (bytes == -1 && (errno == ETIMEDOUT || errno == ECONNRESET || errno == EPIPE))){
+        if (bytes == 0){
+            return 0;
+        }
+        if ((bytes == -1 && (errno == ETIMEDOUT || errno == ECONNRESET || errno == EPIPE))){
             return -1;
         }
         totalBytes += bytes;
@@ -53,27 +63,31 @@ int write_to_socket(int socket_fd, char * buffer, size_t bytes_num){
 
 int main(int argc, char *argv[])
 {
-    if (argc != 4){
-        fprintf(stderr, "Invalid arguments\n");
-        return 1;
-    }
-    int  sockfd     = -1;
+    int  sockfd;
     uint16_t port;
-    char *file_path, *file_memory;
+    char *file_path, file_buffer[ONE_MB];
     int fd;
     struct stat file_stat;
     char *buffer;
     uint32_t fileSize, printable_char;
     struct sockaddr_in serv_addr; // where we Want to get to
-    char *ip_addr = argv[1];
+    char *ip_addr;
     int reuse;
+    int totalBytes_sent;
+    int bytes_sent;
+    int current_bytes_num_read;
 
-
+    if (argc != 4){
+        fprintf(stderr, "Invalid arguments\n");
+        return 1;
+    }
+    signal(SIGINT, SIG_IGN);
+    ip_addr = argv[1];
     port = (uint16_t) atoi(argv[2]);
     file_path = argv[3];
     if (access(file_path, F_OK | R_OK) < 0){
-        perror("CLIENT: No permissions ");
-        return 1;
+        perror("CLIENT: No permissions to read file ");
+        return 0;
     }
 
     if( (sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
@@ -87,20 +101,20 @@ int main(int argc, char *argv[])
     serv_addr.sin_port = htons(port); // Note: htons for endiannes
     if (inet_pton(AF_INET, ip_addr, &(serv_addr.sin_addr.s_addr)) < 0){
         perror("CLIENT: Failed at inet_pton ");
-        // close(sockfd);
+        close(sockfd);
         return 1;
     }
 
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (const void *) &reuse, sizeof(int)) < 0){
         perror("CLIENT: Error at setting socket");
-        // close(sockfd);
-        exit(1);
+        close(sockfd);
+        return 1;
     }
 
     // connect socket to the target address
-    if(connect(sockfd, (struct sockaddr*) &serv_addr, sizeof(serv_addr)) < 0){   
+    if (connect(sockfd, (struct sockaddr*) &serv_addr, sizeof(serv_addr)) < 0){   
         perror("CLIENT: Connecting failed ");
-        // close(sockfd);
+        close(sockfd);
         return 1;
     }
     // Opening file to read
@@ -113,36 +127,46 @@ int main(int argc, char *argv[])
     // Getting file size
     if (fstat(fd, &file_stat) < 0){
         perror("CLIENT: Error at fstat ");
-        // close(sockfd);
-        // close(fd);
+        close(sockfd);
+        close(fd);
         return 1;
     }
 
     // Sending file size
     fileSize = htonl(file_stat.st_size);
     buffer = (char *) &fileSize;
-    if (write_to_socket(sockfd, buffer, 4) < 0){
+    if (write_to_socket(sockfd, buffer, 4) <= 0){
         perror("CLIENT: Failed at sending data to server ");
         return 1;
     }
 
     // Sending file data
-    file_memory = mmap(NULL, file_stat.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    if (write_to_socket(sockfd, file_memory, file_stat.st_size) < 0){
-        perror("CLIENT: Failed at sending data to server ");
-        munmap(file_memory, file_stat.st_size);
-        // close(sockfd);
-        // close(fd);
+    totalBytes_sent = 0;
+    bytes_sent = 1;
+    current_bytes_num_read = 0;
+    while (totalBytes_sent < file_stat.st_size){
+
+        current_bytes_num_read = read(fd, file_buffer, ONE_MB);
+        bytes_sent = write_to_socket(sockfd, file_buffer, current_bytes_num_read);
+        if (bytes_sent <= 0){
+            break;
+        }
+        assert(current_bytes_num_read == bytes_sent);
+        totalBytes_sent += bytes_sent;
+    }
+    if (bytes_sent <= 0){
+        perror("CLIENT: TCP Error occured");
+        close(sockfd);
+        close(fd);
         return 1;
     }
 
     // Getting # of printable characters
     buffer = (char *) &printable_char;
-    if (read_from_socket(sockfd, buffer, 4) < 0){
-        perror("CLIENT: Error reading data from server ");
-        // munmap(file_memory, file_stat.st_size);
-        // close(sockfd);
-        // close(fd);
+    if (read_from_socket(sockfd, buffer, 4) <= 0){
+        perror("CLIENT: TCP Error occured");
+        close(sockfd);
+        close(fd);
         return 1;
     }
     printable_char = ntohl(printable_char);
@@ -150,8 +174,7 @@ int main(int argc, char *argv[])
     // Printing # number of printable chars
     printf("# of printable characters: %u\n", printable_char);
     
-    munmap(file_memory, file_stat.st_size);
-    // close(fd);
-    // close(sockfd);
+    close(fd);
+    close(sockfd);
     return 0;
 }
