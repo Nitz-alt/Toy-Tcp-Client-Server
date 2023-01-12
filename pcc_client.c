@@ -13,22 +13,22 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <assert.h>
-#include <signal.h>
 
 typedef ssize_t (*socket_op) (int, void *, size_t);
 #define ONE_MB 0x100000
+typedef ssize_t (*socketopt)(int, const void *, size_t);
 
 
-
-int read_from_socket(int socket_fd, char * buffer, size_t bytes_num){
+int socket_opt(int socket_fd, char * buffer, size_t bytes_num, socketopt opt){
     int bytes = 0;
     int totalBytes = 0;
     while(1){
-        bytes = read(socket_fd, buffer + totalBytes, bytes_num - totalBytes);
-        if (bytes == 0){
+        bytes = (*opt)(socket_fd, buffer + totalBytes, bytes_num - totalBytes);
+        // Our tcp error instruction
+        if ((bytes == 0) || (bytes == -1 && (errno == ETIMEDOUT || errno == ECONNRESET || errno == EPIPE))){
             return 0;
         }
-        if ((bytes == -1 && (errno == ETIMEDOUT || errno == ECONNRESET || errno == EPIPE))){
+        else if (bytes == -1){
             return -1;
         }
         totalBytes += bytes;
@@ -39,23 +39,12 @@ int read_from_socket(int socket_fd, char * buffer, size_t bytes_num){
     return totalBytes;
 }
 
+int read_from_socket(int socket_fd, char * buffer, size_t bytes_num){               
+    return socket_opt(socket_fd, buffer, bytes_num, (ssize_t (*)(int, const void *, size_t)) &read);
+}
+
 int write_to_socket(int socket_fd, char * buffer, size_t bytes_num){
-    int bytes = 0;
-    int totalBytes = 0;
-    while(1){
-        bytes = write(socket_fd, buffer + totalBytes, bytes_num - totalBytes);
-        if (bytes == 0){
-            return 0;
-        }
-        if ((bytes == -1 && (errno == ETIMEDOUT || errno == ECONNRESET || errno == EPIPE))){
-            return -1;
-        }
-        totalBytes += bytes;
-        if (totalBytes == bytes_num){
-            break;
-        }
-    }
-    return totalBytes;
+    return socket_opt(socket_fd, buffer, bytes_num, &write);
 }
 
 
@@ -72,16 +61,16 @@ int main(int argc, char *argv[])
     uint32_t fileSize, printable_char;
     struct sockaddr_in serv_addr; // where we Want to get to
     char *ip_addr;
-    int reuse;
+    int reuse = 1;
     int totalBytes_sent;
     int bytes_sent;
+    int result;
     int current_bytes_num_read;
 
     if (argc != 4){
         fprintf(stderr, "Invalid arguments\n");
         return 1;
     }
-    signal(SIGINT, SIG_IGN);
     ip_addr = argv[1];
     port = (uint16_t) atoi(argv[2]);
     file_path = argv[3];
@@ -117,6 +106,7 @@ int main(int argc, char *argv[])
         close(sockfd);
         return 1;
     }
+
     // Opening file to read
     fd = open(file_path, O_RDONLY);
     if (fd < 0){
@@ -135,10 +125,12 @@ int main(int argc, char *argv[])
     // Sending file size
     fileSize = htonl(file_stat.st_size);
     buffer = (char *) &fileSize;
-    if (write_to_socket(sockfd, buffer, 4) <= 0){
+    result = write_to_socket(sockfd, buffer, 4);
+    if ( result == 0){
         perror("CLIENT: Failed at sending data to server ");
         return 1;
     }
+    else if (result == -1){exit(EXIT_FAILURE);}
 
     // Sending file data
     totalBytes_sent = 0;
@@ -154,21 +146,25 @@ int main(int argc, char *argv[])
         assert(current_bytes_num_read == bytes_sent);
         totalBytes_sent += bytes_sent;
     }
-    if (bytes_sent <= 0){
+    if (bytes_sent == 0){
         perror("CLIENT: TCP Error occured");
         close(sockfd);
         close(fd);
         return 1;
     }
+    else if (bytes_sent == -1){exit(EXIT_FAILURE);}
 
     // Getting # of printable characters
     buffer = (char *) &printable_char;
-    if (read_from_socket(sockfd, buffer, 4) <= 0){
+    result = read_from_socket(sockfd, buffer, 4);
+    if ( result == 0){
         perror("CLIENT: TCP Error occured");
         close(sockfd);
         close(fd);
         return 1;
     }
+    else if (result == -1){exit(EXIT_FAILURE);}
+    
     printable_char = ntohl(printable_char);
 
     // Printing # number of printable chars

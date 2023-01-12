@@ -12,33 +12,40 @@
 #define IS_PRINTABLE_CHAR(X) ((32 <= (X)) && ((X) <= 126))
 #define ONE_MB 0x100000
 #define MIN(X,Y) ((X) < (Y) ? (X) : (Y))
+typedef ssize_t (*socketopt)(int, const void *, size_t);
+
 
 int EXIT = 0;
 uint32_t pcc_total[95];
 int listenfd, connfd;
+struct sockaddr_in peer_addr;
 
-
-void setExit(int  signum){
-    EXIT = 1;
-}
-
-void print_counts_and_exit(int signum){
+void print_counts_and_exit(){
     for (int i = 0; i <= 95; i++){
         printf("char '%c' : %u times\n", (char) i + 32, pcc_total[i]);
     }
+    close(listenfd);
     exit(0);
 }
 
+void sig_handle(int  signum){
+    EXIT = 1;
+    if (ntohl(peer_addr.sin_addr.s_addr) == 0){
+        // There is not connection currently ==> print and die
+        print_counts_and_exit();
+    }
+}
 
-int read_from_socket(int socket_fd, char * buffer, size_t bytes_num){
+int socket_opt(int socket_fd, char * buffer, size_t bytes_num, socketopt opt){
     int bytes = 0;
     int totalBytes = 0;
     while(1){
-        bytes = read(socket_fd, buffer + totalBytes, bytes_num - totalBytes);
-        if (bytes == 0){
+        bytes = (*opt)(socket_fd, buffer + totalBytes, bytes_num - totalBytes);
+        // Our tcp error instruction
+        if ((bytes == 0) || (bytes == -1 && (errno == ETIMEDOUT || errno == ECONNRESET || errno == EPIPE))){
             return 0;
         }
-        if ((bytes == -1 && (errno == ETIMEDOUT || errno == ECONNRESET || errno == EPIPE))){
+        else if (bytes == -1){
             return -1;
         }
         totalBytes += bytes;
@@ -49,23 +56,12 @@ int read_from_socket(int socket_fd, char * buffer, size_t bytes_num){
     return totalBytes;
 }
 
+int read_from_socket(int socket_fd, char * buffer, size_t bytes_num){               
+    return socket_opt(socket_fd, buffer, bytes_num, (ssize_t (*)(int, const void *, size_t)) &read);
+}
+
 int write_to_socket(int socket_fd, char * buffer, size_t bytes_num){
-    int bytes = 0;
-    int totalBytes = 0;
-    while(1){
-        bytes = write(socket_fd, buffer + totalBytes, bytes_num - totalBytes);
-        if (bytes == 0){
-            return 0;
-        }
-        if ((bytes == -1 && (errno == ETIMEDOUT || errno == ECONNRESET || errno == EPIPE))){
-            return -1;
-        }
-        totalBytes += bytes;
-        if (totalBytes == bytes_num){
-            break;
-        }
-    }
-    return totalBytes;
+    return socket_opt(socket_fd, buffer, bytes_num, &write);
 }
 
 
@@ -90,24 +86,21 @@ int main(int argc, char *argv[])
     char *buffer;
     char charater;
     uint32_t total_printables;
-    int reuse;
+    int reuse = 1;
+    int result;
     uint32_t pcc_total_atm[95];
     uint32_t current_bytes_read_count;
 
-    struct sigaction sa_mid, sa_finish;
+    struct sigaction sa;
 
     port = atoi(argv[1]);
     connfd = -1;
 
-    sa_mid.sa_flags = SA_RESTART;
-    sa_finish.sa_flags = SA_RESTART;
-    sigemptyset(&sa_mid.sa_mask);
-    sigemptyset(&sa_finish.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_handler = sig_handle;
 
-    sa_mid.sa_handler = setExit;
-    sa_finish.sa_handler = print_counts_and_exit;
-
-    if (sigaction(SIGINT, &sa_finish, NULL) < 0){
+    if (sigaction(SIGINT, &sa, NULL) < 0){
         perror("SERVER: Failed at sigaction");
         return 1;
     }
@@ -144,27 +137,23 @@ int main(int argc, char *argv[])
     while(1){
         while(1){
             // Accept a connection.
-            connfd = accept( listenfd, NULL, NULL);
-            if (sigaction(SIGINT, &sa_mid, NULL) < 0){
-                perror("SERVER: Failed at sigaction");
-                close(connfd);
-                close(listenfd);
-                return 1;
-            }
+            connfd = accept(listenfd, (struct sockaddr *) &peer_addr, &addrsize);
             if( connfd < 0 ){
                 perror("SERVER: Error at accepting connection");
                 if (errno == ETIMEDOUT || errno == ECONNRESET || errno == EPIPE){
                     break;
                 }
-                close(listenfd);
-                exit(1);
             }
             // Reading number of bytes
             buffer = (char *) &file_size;
-            if (read_from_socket(connfd, buffer, 4) <= 0){
+            result = read_from_socket(connfd, buffer, 4);
+            if (result == 0){
                 perror("SERVER: TCP Error occured, read size");
                 close(connfd);
                 break;
+            }
+            else if (result == -1){
+                exit(EXIT_FAILURE);
             }
             file_size = ntohl(file_size);
 
@@ -191,40 +180,37 @@ int main(int argc, char *argv[])
                 }
                 totalBytesRead += bytesRead;
             }
-            if (bytesRead <= 0){
+            if (bytesRead == 0){
                 perror("SERVER: TCP Error occured, read file");
                 close(connfd);
                 break;
+            }
+            if (bytesRead == -1){
+                exit(EXIT_FAILURE);
             }
 
             // Sending # of printables to the client
             total_printables = htonl(total_printables);
             buffer = (char *) &total_printables;
-            if (write_to_socket(connfd, buffer, 4) <= 0){
+            result = write_to_socket(connfd, buffer, 4);
+            if ( result == 0){
                 perror("SERVER: TCP Error occured, write printables count");
                 close(connfd);
                 break;
             }
+            else if (result == -1){exit(EXIT_FAILURE);}
 
             if (close(connfd) < -1){
                 break;
             }
-
+            
             // Copying result
             for (int i = 0; i < 95; i++){
                 pcc_total[i] += pcc_total_atm[i];
             }
             break;
         }
+        memset(&peer_addr, 0, addrsize);
         memset(pcc_total_atm, 0, sizeof(uint32_t) * 95);
-        if (EXIT){
-                print_counts_and_exit(SIGINT);
-        }
-        if (sigaction(SIGINT, &sa_finish, NULL) < 0){
-            perror("SERVER: Failed at sigaction");
-            close(connfd);
-            close(listenfd);
-            return 1;
-        }
     }
 }
