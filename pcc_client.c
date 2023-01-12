@@ -14,7 +14,6 @@
 #include <sys/stat.h>
 #include <assert.h>
 
-typedef ssize_t (*socket_op) (int, void *, size_t);
 #define ONE_MB 0x100000
 typedef ssize_t (*socketopt)(int, const void *, size_t);
 

@@ -143,7 +143,7 @@ int main(int argc, char *argv[])
                 if (errno == ETIMEDOUT || errno == ECONNRESET || errno == EPIPE){
                     break;
                 }
-                close(connfd);
+                // close(connfd);
                 exit(EXIT_FAILURE);
             }
             // Reading number of bytes
@@ -151,7 +151,7 @@ int main(int argc, char *argv[])
             result = read_from_socket(connfd, buffer, 4);
             if (result == 0){
                 perror("SERVER: TCP Error occured, read size");
-                close(connfd);
+                // close(connfd);
                 break;
             }
             else if (result == -1){
@@ -184,7 +184,7 @@ int main(int argc, char *argv[])
             }
             if (bytesRead == 0){
                 perror("SERVER: TCP Error occured, read file");
-                close(connfd);
+                // close(connfd);
                 break;
             }
             if (bytesRead == -1){
@@ -197,7 +197,7 @@ int main(int argc, char *argv[])
             result = write_to_socket(connfd, buffer, 4);
             if ( result == 0){
                 perror("SERVER: TCP Error occured, write printables count");
-                close(connfd);
+                // close(connfd);
                 break;
             }
             else if (result == -1){exit(EXIT_FAILURE);}
@@ -212,6 +212,7 @@ int main(int argc, char *argv[])
             }
             break;
         }
+        close(connfd);
         if (EXIT == 1){
             print_counts_and_exit();
         }
