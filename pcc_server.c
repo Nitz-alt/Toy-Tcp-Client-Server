@@ -143,6 +143,8 @@ int main(int argc, char *argv[])
                 if (errno == ETIMEDOUT || errno == ECONNRESET || errno == EPIPE){
                     break;
                 }
+                close(connfd);
+                exit(EXIT_FAILURE);
             }
             // Reading number of bytes
             buffer = (char *) &file_size;
@@ -209,6 +211,9 @@ int main(int argc, char *argv[])
                 pcc_total[i] += pcc_total_atm[i];
             }
             break;
+        }
+        if (EXIT == 1){
+            print_counts_and_exit();
         }
         memset(&peer_addr, 0, addrsize);
         memset(pcc_total_atm, 0, sizeof(uint32_t) * 95);
