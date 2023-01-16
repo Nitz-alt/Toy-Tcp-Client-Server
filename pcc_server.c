@@ -70,7 +70,7 @@ int main(int argc, char *argv[])
 {
     // Validating correct number of arguments:
     if (argc != 2){
-        perror("SERVER: Number of arguments not valid.");
+        perror("SERVER: Number of arguments not valid. Usage: ./server <port>\nErrno message");
         exit(1);
     }
 

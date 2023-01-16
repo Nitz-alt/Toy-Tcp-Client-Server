@@ -67,7 +67,7 @@ int main(int argc, char *argv[])
     int current_bytes_num_read;
 
     if (argc != 4){
-        fprintf(stderr, "Invalid arguments\n");
+        perror("CLIENT: Invalid arguments. Usage: ./client <ip address> <port> <file name>\nErrno message");
         return 1;
     }
     ip_addr = argv[1];
