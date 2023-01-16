@@ -87,7 +87,7 @@ int main(int argc, char *argv[])
     memset(&serv_addr, 0, sizeof(struct sockaddr_in));
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(port); // Note: htons for endiannes
-    if (inet_pton(AF_INET, ip_addr, &(serv_addr.sin_addr.s_addr)) < 0){
+    if (inet_pton(AF_INET, ip_addr, &(serv_addr.sin_addr.s_addr)) < 1){
         perror("CLIENT: Failed at inet_pton ");
         close(sockfd);
         return 1;

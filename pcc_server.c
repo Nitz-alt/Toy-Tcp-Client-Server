@@ -21,7 +21,7 @@ int listenfd, connfd;
 struct sockaddr_in peer_addr;
 
 void print_counts_and_exit(){
-    for (int i = 0; i <= 95; i++){
+    for (int i = 0; i < 95; i++){
         printf("char '%c' : %u times\n", (char) i + 32, pcc_total[i]);
     }
     close(listenfd);
